@@ -1,3 +1,4 @@
+[hidden]{display:none!important}
 :root{--bg:#0a0a0c;--s1:#111114;--s2:#17171b;--line:#24242a;--line2:#33333b;--text:#ecebe6;--muted:#8d8c94;--faint:#5d5c64;--gold:#c9a961;--gold2:#8a7543;--warn:#d98c6a}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
