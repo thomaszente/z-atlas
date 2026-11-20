@@ -19,7 +19,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 const params = new URLSearchParams(location.search);
 
 const S = {
-  venues: [], admin: false, key: store.get("atlas-key", ""), source: "",
+  venues: [], admin: false, t: store.get("zen-t", ""), role: "", name: "", queue: [], mine: [], scouts: [], hl: null, share: params.get("share") || "", source: "",
   f: { city: params.get("city") || "", types: new Set(), cap: "", io: "", late: false, q: "", status: "" },
   sel: null, picked: new Set((params.get("ids") || "").split(",").filter(Boolean)),
   present: params.get("present") === "1", scout: [], map: null, mapReady: false,
@@ -32,20 +32,19 @@ function toast(msg, ms = 3500) { const t = $("#toast"); t.textContent = msg; t.h
 function fromSheetRow(o) { const v = {}; for (const [h, val] of Object.entries(o)) { if (h.startsWith("★ ")) { (v.crit = v.crit || {})[h.slice(2)] = val; continue; } const k = HEAD[h]; if (k) v[k] = val; } return v; }
 async function load() {
   let rows = null;
-  if (C.SHEET_API) {
-    try {
-      const u = C.SHEET_API + (S.key ? (C.SHEET_API.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(S.key) : "");
-      const r = await fetch(u); const j = await r.json();
-      rows = (j.venues || []).map(fromSheetRow); S.admin = !!j.admin; S.source = "Live from Google Sheet";
-      S.promoters = (j.promoters || []).filter(p => p.Name); S.media = (j.media || []).filter(m => m.Name);
-      if (S.key && !j.admin) { toast("Owner key not accepted — showing the public view."); }
-    } catch (e) { toast("Couldn't reach your Google Sheet — showing the saved list."); }
-  }
-  if (!rows) {
-    const r = await fetch("venues.json"); rows = await r.json(); S.source = "Starter list"; S.admin = false;
-    if (S.key) toast("Private data needs your Google Sheet connected (see README).");
-  }
-  if (S.present) S.admin = false;
+  if (!C.SHEET_API) { gate("ZEN ATLAS isn't connected to its data yet."); return; }
+  try {
+    const sep = C.SHEET_API.includes("?") ? "&" : "?";
+    const u = C.SHEET_API + sep + (S.share ? "share=" + encodeURIComponent(S.share) : "t=" + encodeURIComponent(S.t));
+    const r = await fetch(u); const j = await r.json();
+    if (!j.auth) { if (S.share) { gate("This shared link has expired. Ask for a new one."); return; } if (S.t) { S.t = ""; store.set("zen-t", ""); } gate(); return; }
+    hideGate();
+    rows = (j.venues || []).map(fromSheetRow); S.role = j.role || ""; S.name = j.name || ""; S.admin = j.role === "owner";
+    S.promoters = (j.promoters || []).filter(p => p.Name); S.media = (j.media || []).filter(m => m.Name);
+    S.queue = j.queue || []; S.mine = j.mine || []; S.scouts = j.scouts || [];
+    S.source = "Live" + (j.updated ? " · " + new Date(j.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
+  } catch (e) { gate("Couldn't reach ZEN ATLAS right now. Check your connection and try again."); return; }
+  if (S.present || S.share) { S.present = true; S.admin = false; }
   const geo = store.get("atlas-geo", {});
   S.venues = rows.filter(v => v.name).map((v, i) => {
     const id = v.id || "v" + normName(v.name) + normName(v.city);
@@ -54,13 +53,38 @@ async function load() {
     return { ...v, _id: id, _lat: lat, _lng: lng };
   });
   document.querySelectorAll(".owner-only").forEach(el => el.hidden = !S.admin);
-  $("#ownerBtn").classList.toggle("on", S.admin);
-  $("#ownerBtn").textContent = S.admin ? "Owner ✓" : "Owner";
-  $("#src").textContent = S.source + (S.admin ? " · owner view" : "");
+  document.querySelectorAll(".scout-only").forEach(el => el.hidden = S.present || !S.role || S.role === "client");
+  const ab = $("#ownerBtn"); ab.hidden = S.present; ab.classList.toggle("on", S.admin);
+  ab.innerHTML = esc(S.admin ? "Owner" : (S.name || "Account").split(" ")[0]) + (S.admin && S.queue.length ? ` <b class="badge">${S.queue.length}</b>` : "");
+  $("#src").textContent = S.source + (S.admin ? " · owner view" : S.role ? " · " + S.role : "");
   if (S.mapReady) S.map.setPaintProperty("pts", "circle-color", S.admin ? statusMatch : typeMatch);
   render(); pushMap(); geocodeMissing();
   if (S.f.city) fitCity(S.f.city);
 }
+
+/* ---------------- sign-in gate (invite-only) ---------------- */
+function gate(msg) {
+  const g = $("#gate"); g.hidden = false; document.body.classList.add("gated");
+  const em = store.get("zen-email", "");
+  g.querySelector(".gbox").innerHTML = `<div class="logo">${esc($("#brand").textContent)}</div><div class="tagline">${esc($("#tagline").textContent)}</div>
+    ${msg ? `<p class="meta">${esc(msg)}</p>` : `<p class="meta">Invite-only beta. Sign in with the email you were invited with — we'll send you a one-time code.</p>`}
+    ${S.share && msg ? "" : `<div id="gStep1"><input type="email" id="gEmail" placeholder="you@email.com" value="${esc(em)}" autocomplete="email"><button class="btn gold" id="gSend">Send code</button></div>
+    <div id="gStep2" hidden><input inputmode="numeric" id="gCode" placeholder="6-digit code" maxlength="6" autocomplete="one-time-code"><button class="btn gold" id="gVerify">Sign in</button><button class="btn" id="gBack">Use a different email</button></div>
+    <p class="meta" id="gMsg"></p><p class="meta faint">Want in? Write to <a href="mailto:${esc(C.CONTACT_EMAIL || "")}?subject=ZEN%20ATLAS%20beta">${esc(C.CONTACT_EMAIL || "")}</a>.</p>`}`;
+  const send = $("#gSend"); if (!send) return;
+  const say = t => $("#gMsg").textContent = t;
+  const doSend = async () => { const email = $("#gEmail").value.trim().toLowerCase(); if (!email) return; send.disabled = true; say("Sending…");
+    try { const j = await post({ action: "requestCode", email }); if (!j.ok) { say(j.error || "Couldn't send a code."); send.disabled = false; return; }
+      store.set("zen-email", email); $("#gStep1").hidden = true; $("#gStep2").hidden = false; say(j.message + " Check your inbox (and spam)."); setTimeout(() => $("#gCode").focus(), 30);
+    } catch (_) { say("Couldn't reach ZEN ATLAS. Try again."); } send.disabled = false; };
+  const doVerify = async () => { const code = $("#gCode").value.trim(); if (code.length < 6) return; $("#gVerify").disabled = true; say("Checking…");
+    try { const j = await post({ action: "verifyCode", email: store.get("zen-email", ""), code }); if (!j.ok) { say(j.error || "That didn't work."); $("#gVerify").disabled = false; return; }
+      S.t = j.token; store.set("zen-t", S.t); say(""); load(); } catch (_) { say("Couldn't reach ZEN ATLAS. Try again."); $("#gVerify").disabled = false; } };
+  send.onclick = doSend; $("#gEmail").onkeydown = e => { if (e.key === "Enter") doSend(); };
+  $("#gVerify").onclick = doVerify; $("#gCode").onkeydown = e => { if (e.key === "Enter") doVerify(); };
+  $("#gBack").onclick = () => { $("#gStep1").hidden = false; $("#gStep2").hidden = true; say(""); };
+}
+function hideGate() { $("#gate").hidden = true; document.body.classList.remove("gated"); }
 
 /* ---------------- geocoding (only for venues without coordinates) ---------------- */
 const geoKey = v => [v.address, v.city, v.country].filter(Boolean).join(", ").toLowerCase();
@@ -80,10 +104,10 @@ async function geocodeMissing() {
   geoBusy = false; render();
 }
 async function post(body) {
-  const r = await fetch(C.SHEET_API, { method: "POST", body: JSON.stringify({ ...body, key: S.key }) });
+  const r = await fetch(C.SHEET_API, { method: "POST", body: JSON.stringify({ ...body, t: S.t }) });
   return r.json();
 }
-function saveCoords(v) { post({ action: "setCoords", id: v.id, lat: v._lat, lng: v._lng }).catch(() => {}); }
+function saveCoords(v) { if (!S.admin) return; post({ action: "setCoords", id: v.id, lat: v._lat, lng: v._lng }).catch(() => {}); }
 
 /* ---------------- filtering ---------------- */
 function inCap(v) { if (!S.f.cap) return true; const [a, b] = S.f.cap.split("-").map(Number); const c = num(v.cap); return c !== null && c >= a && c <= b; }
@@ -152,7 +176,7 @@ function sceneList() {
 function renderScene() {
   $(".filters").hidden = true;
   const xs = sceneList(), P = S.view === "promoters";
-  $("#stats").textContent = `${xs.length} ${P ? "promoters, collectives & series" : "media outlets, blogs & listings"}${S.f.city ? " in " + S.f.city : ""}`;
+  $("#stats").textContent = `${xs.length} ${P ? "promoters, collectives & series" : "media outlets, blogs & listings"}${S.f.city ? " in " + S.f.city : ""}${P ? " · map shows the venues they use" : ""}`;
   $("#list").innerHTML = xs.length ? xs.map((x, i) => `<div class="card ${S.selScene === x ? "sel" : ""}" data-scene="${i}">
       <span class="dot" style="background:${P ? sceneColor(x.Type) : "#6fa8dc"}"></span>
       <div style="min-width:0;flex:1"><div class="nm">${esc(x.Name)}</div><div class="mt">${esc([x.Type, P ? x.Genres : x.Focus].filter(Boolean).join(" · "))}</div>
@@ -167,19 +191,23 @@ function openScene(x) {
   const linked = P ? S.venues.filter(v => v.city === x.City && venueMatches(x["Home venues"], v)) : [];
   d.innerHTML = `<button class="ic x" id="closeD">Close</button>
     <span class="tag"><span class="dot" style="background:${P ? sceneColor(x.Type) : "#6fa8dc"};margin-right:6px"></span>${esc(x.Type || (P ? "Promoter" : "Media"))}</span>
-    <h1>${esc(x.Name)}</h1><div class="sub">${esc([x.City, x.Country].filter(Boolean).join(" · "))}</div>
+    <h1>${esc(x.Name)}</h1><div class="sub">${esc([x.City, x.Country].filter(Boolean).join(" · "))}</div>${verifiedLine(x.Verified)}
     ${x["Public description"] ? `<p class="desc">${esc(x["Public description"])}</p>` : x.Focus ? `<p class="desc">${esc(x.Focus)}</p>` : ""}
     <div class="links">${x.Website ? `<a class="btn" href="${esc(x.Website)}" target="_blank" rel="noopener">Website ↗</a>` : ""}${x.Instagram ? `<a class="btn" href="${esc(igUrl(x.Instagram))}" target="_blank" rel="noopener">Instagram ↗</a>` : ""}</div>
     <h3>Details</h3><div class="kv">
       ${kv("Genres", esc(x.Genres), true)}${kv("Home venues", esc(x["Home venues"]), true)}${kv("Event series", esc(x["Event series"]), true)}
       ${kv("Key people", esc(x["Key people"]), true)}${kv("Booking / contact", esc(x["Booking contact"] || x["Submit / contact"]), true)}
-      ${kv("Last event seen", esc(x["Last event seen"]))}${kv("Status", esc(x.Status))}${kv("Verified", esc(x.Verified))}
+      ${kv("Last event seen", esc(x["Last event seen"]))}${kv("Status", esc(x.Status))}
       ${S.admin ? kv("Private notes", esc(x["Notes (private)"]), true) + kv("In my rolodex", esc(x["In my rolo"])) + kv("Sources", esc(x.Sources), true) : ""}
     </div>
-    ${linked.length ? `<h3>Venues they use</h3>${linked.map(v => `<div class="card" data-goto="${esc(v._id)}"><span class="dot" style="background:${TYPE_COLORS[v.type] || "#999"}"></span><div><div class="nm">${esc(v.name)}</div><div class="mt">${esc([v.type, v.area].filter(Boolean).join(" · "))}</div></div></div>`).join("")}` : ""}`;
+    ${linked.length ? `<h3>Venues they use</h3>${linked.map(v => `<div class="card" data-goto="${esc(v._id)}"><span class="dot" style="background:${TYPE_COLORS[v.type] || "#999"}"></span><div><div class="nm">${esc(v.name)}</div><div class="mt">${esc([v.type, v.area].filter(Boolean).join(" · "))}</div></div></div>`).join("")}` : ""}
+    ${canSuggest() ? `<div class="links" style="margin-top:16px"><button class="btn" id="sugBtn">Suggest an edit</button></div>` : ""}`;
   d.hidden = false;
-  $("#closeD").onclick = () => { d.hidden = true; S.selScene = null; render(); };
-  d.querySelectorAll("[data-goto]").forEach(c => c.onclick = () => { S.view = "venues"; S.selScene = null; open(c.dataset.goto); });
+  S.hl = P && linked.length ? new Set(linked.map(v => v._id)) : null; pushMap();
+  if (S.hl && S.mapReady) { const pts = linked.filter(v => v._lat !== null); if (pts.length === 1) S.map.flyTo({ center: [pts[0]._lng, pts[0]._lat], zoom: 14 }); else if (pts.length) { const bb = new maplibregl.LngLatBounds(); pts.forEach(v => bb.extend([v._lng, v._lat])); S.map.fitBounds(bb, { padding: 80, maxZoom: 14 }); } }
+  const sb = $("#sugBtn"); if (sb) sb.onclick = () => suggest(P ? "ZENTES_WORLD_Promoters" : "ZENTES_WORLD_Media", { id: x.ID, name: x.Name, city: x.City, get: f => x[f] });
+  $("#closeD").onclick = () => { d.hidden = true; S.selScene = null; S.hl = null; render(); pushMap(); };
+  d.querySelectorAll("[data-goto]").forEach(c => c.onclick = () => { S.view = "venues"; S.selScene = null; S.hl = null; pushMap(); open(c.dataset.goto); });
 }
 function venueMatches(text, v) {
   text = String(text || "").toLowerCase(); if (!text || !v.name) return false;
@@ -188,6 +216,13 @@ function venueMatches(text, v) {
 }
 
 /* ---------------- detail ---------------- */
+function verifiedLine(x) {
+  x = String(x || "").trim(); if (!x) return `<div class="ver old">Not yet verified</div>`;
+  const m = x.match(/^(\d{4})-(\d{2})/); let when = x, by = "";
+  if (m) { when = new Date(+m[1], +m[2] - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" }); by = x.split("·")[1] ? x.split("·")[1].trim() : ""; }
+  const ageM = m ? (new Date().getFullYear() - +m[1]) * 12 + (new Date().getMonth() + 1 - +m[2]) : 0;
+  return `<div class="ver ${ageM > 6 ? "old" : ""}">✓ Verified ${esc(when)}${by ? " · by " + esc(by) : ""}</div>`;
+}
 const kv = (label, val, wide) => (val === undefined || val === null || val === "") ? "" : `<div class="${wide ? "wide" : ""}"><label>${label}</label><span>${val}</span></div>`;
 function gmaps(v) { return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([v.name, v.address, v.city, v.country].filter(Boolean).join(", ")); }
 function igUrl(h) { h = String(h || "").trim(); if (!h) return ""; if (/^https?:/.test(h)) return h; return "https://instagram.com/" + h.replace(/^@/, ""); }
@@ -211,22 +246,23 @@ function open(id, fly = true) {
       ${kv("Owner", esc(v.owner))}${kv("Operator", esc(v.operator))}
       ${kv("Key contact", esc(v.contact) + (v.cphone ? `<br><a href="tel:${esc(v.cphone)}">${esc(v.cphone)}</a>` : "") + (v.cemail ? `<br><a href="mailto:${esc(v.cemail)}">${esc(v.cemail)}</a>` : ""), true)}
       ${kv("Last visit", esc(v.last))}${kv("Score", v.score ? `<span class="big">${esc(v.score)}</span><span class="meta"> / 100</span>` : "")}
-      ${crit}${kv("Notes", esc(v.notes), true)}${kv("Sources", esc(v.sources), true)}${kv("Verified", esc(v.verified))}
+      ${crit}${kv("Notes", esc(v.notes), true)}${kv("Sources", esc(v.sources), true)}
     </div>
     ${(v.country || "").match(/^(usa|us|united states)/i) ? `<div style="margin-top:12px"><button class="btn gold" id="txBtn">Texas liquor receipts · official data</button><div id="txOut"></div></div>` : ""}
     </div>` : "";
   d.innerHTML = `<button class="ic x" id="closeD">Close</button>
     <span class="tag"><span class="dot" style="background:${TYPE_COLORS[v.type] || "#999"};margin-right:6px"></span>${esc(v.type || "Venue")}</span>
     <h1>${esc(v.name)}</h1>
-    <div class="sub">${esc([v.address, v.area, v.city, v.country].filter(Boolean).join(" · "))}</div>
+    <div class="sub">${esc([v.address, v.area, v.city, v.country].filter(Boolean).join(" · "))}</div>${verifiedLine(v.verified)}
     ${v.desc ? `<p class="desc">${esc(v.desc)}</p>` : ""}
     <div class="links">${v.link ? `<a class="btn" href="${esc(v.link)}" target="_blank" rel="noopener">Website ↗</a>` : ""}${v.ig ? `<a class="btn" href="${esc(igUrl(v.ig))}" target="_blank" rel="noopener">Instagram ↗</a>` : ""}
       <a class="btn" href="${gmaps(v)}" target="_blank" rel="noopener">Google Maps ↗</a>
       ${S.present || !S.admin ? `<a class="btn gold" href="mailto:${esc(C.CONTACT_EMAIL || "")}?subject=${encodeURIComponent("Venue inquiry: " + v.name)}">Inquire</a>` : ""}</div>
-    <h3>Specs</h3>${pub}${scenehere(v)}${priv}`;
+    <h3>Specs</h3>${pub}${scenehere(v)}${canSuggest() ? `<div class="links" style="margin-top:14px"><button class="btn" id="sugBtn">Suggest an edit</button></div>` : ""}${priv}`;
   d.hidden = false;
   $("#closeD").onclick = () => { d.hidden = true; S.sel = null; render(); if (S.mapReady) S.map.getSource("sel").setData(fc([])); };
   const tb = $("#txBtn"); if (tb) tb.onclick = () => txLiquor(v);
+  const sb = $("#sugBtn"); if (sb) sb.onclick = () => suggest("ZENTES_WORLD_Venues", { id: v.id, name: v.name, city: v.city, get: f => v[HEAD[f]] });
   d.querySelectorAll("[data-promo]").forEach(c => c.onclick = () => { const p = S.promoters.find(x => x.Name === c.dataset.promo); if (p) { S.view = "promoters"; openScene(p); } });
 }
 
@@ -259,7 +295,14 @@ async function txLiquor(v) {
 
 /* ---------------- map ---------------- */
 function fc(list) { return { type: "FeatureCollection", features: list.filter(v => v._lat !== null && v._lng !== null).map(v => ({ type: "Feature", geometry: { type: "Point", coordinates: [v._lng, v._lat] }, properties: { id: v._id, name: v.name, type: v.type || "Other", cap: num(v.cap) || 0, status: v.status || "Scouting" } })) }; }
-function pushMap() { if (S.mapReady) S.map.getSource("venues").setData(fc(visible())); }
+function mapList() {
+  if (S.view !== "promoters") return visible();
+  const ps = S.promoters.filter(p => !S.f.city || p.City === S.f.city);
+  let vs = S.venues.filter(v => ps.some(p => p.City === v.city && venueMatches(p["Home venues"], v)));
+  if (S.hl) vs = vs.filter(v => S.hl.has(v._id));
+  return vs;
+}
+function pushMap() { if (S.mapReady) S.map.getSource("venues").setData(fc(mapList())); }
 async function darkStyle() {
   const s = await (await fetch(C.STYLE_URL || "https://tiles.openfreemap.org/styles/positron")).json();
   (s.layers || []).forEach(l => {
@@ -352,25 +395,111 @@ function scoutPopup(f, lngLat) {
 /* ---------------- share / present ---------------- */
 function share() {
   const base = location.origin + location.pathname;
-  const cityUrl = base + "?present=1" + (S.f.city ? "&city=" + encodeURIComponent(S.f.city) : "");
-  const pickUrl = S.picked.size ? base + "?present=1&ids=" + [...S.picked].map(encodeURIComponent).join(",") + (S.f.city ? "&city=" + encodeURIComponent(S.f.city) : "") : "";
+  const ids = [...S.picked].map(id => (S.venues.find(v => v._id === id) || {}).id).filter(Boolean);
   modal(`<h2>Share with a client</h2>
-    <p class="meta">Client links never include private intel (rent, liquor sales, owners, contacts, notes). Venues with an <b>Inquire</b> button email you.</p>
-    <label class="meta">${S.f.city ? esc(S.f.city) + " — all venues" : "All venues"}</label><input type="text" readonly value="${esc(cityUrl)}">
-    ${pickUrl ? `<label class="meta">Your shortlist (${S.picked.size} picked)</label><input type="text" readonly value="${esc(pickUrl)}">` : `<p class="meta">Tip: tick the box on any venue card to build a shortlist link.</p>`}
-    <div class="row"><button class="btn" data-close>Close</button><button class="btn gold" id="copyShare">Copy ${pickUrl ? "shortlist" : "link"}</button></div>`);
-  $("#copyShare").onclick = async () => { try { await navigator.clipboard.writeText(pickUrl || cityUrl); toast("Link copied."); } catch (_) { toast("Select the link and copy it."); } };
+    <p class="meta">The map is invite-only, so client links are made one at a time. They show venues only — never promoters, contacts, rents, notes or anything private — and expire after 90 days.</p>
+    <p class="meta">${ids.length ? `Your shortlist: <b>${ids.length} venue${ids.length > 1 ? "s" : ""}</b> picked.` : S.f.city ? `All public venues in <b>${esc(S.f.city)}</b>.` : "Tip: pick a city or tick venue cards to build a shortlist first."}</p>
+    <input type="text" readonly id="shareUrl" placeholder="Click Create link">
+    <div class="row"><button class="btn" data-close>Close</button><button class="btn gold" id="mkShare">Create link</button></div>`);
+  $("#mkShare").onclick = async () => {
+    const btn = $("#mkShare"); if (btn.dataset.url) { try { await navigator.clipboard.writeText(btn.dataset.url); toast("Link copied."); } catch (_) { toast("Select the link and copy it."); } return; }
+    btn.disabled = true; btn.textContent = "Creating…";
+    try { const j = await post({ action: "createShare", ids, city: ids.length ? "" : S.f.city }); if (!j.ok) throw 0;
+      const url = base + "?share=" + j.share + (S.f.city ? "&city=" + encodeURIComponent(S.f.city) : ""); $("#shareUrl").value = url; btn.dataset.url = url; btn.textContent = "Copy link";
+    } catch (_) { toast("Couldn't create the link."); btn.textContent = "Create link"; } btn.disabled = false; };
 }
 function owner() {
-  if (S.admin) { modal(`<h2>Owner view</h2><p class="meta">You're signed in on this device.</p><div class="row"><button class="btn" data-close>Close</button><button class="btn gold" id="signOut">Sign out</button></div>`); $("#signOut").onclick = () => { S.key = ""; store.set("atlas-key", ""); closeModal(); load(); }; return; }
-  modal(`<h2>Owner sign-in</h2><p class="meta">${C.SHEET_API ? "Enter your owner key to see private intel and scouting tools on this device." : "Connect your Google Sheet first (README step 2). Then your owner key unlocks private intel."}</p>
-    <input type="password" id="keyIn" placeholder="Owner key" autocomplete="current-password"><div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="keyGo">Sign in</button></div>`);
-  setTimeout(() => $("#keyIn").focus(), 30);
-  const go = () => { S.key = $("#keyIn").value.trim(); store.set("atlas-key", S.key); closeModal(); load(); };
-  $("#keyGo").onclick = go; $("#keyIn").onkeydown = e => { if (e.key === "Enter") go(); };
+  const mine = S.mine.slice(0, 20);
+  const pill = st => `<span class="tag ${st === "Approved" ? "ok" : st === "Rejected" ? "no" : ""}">${esc(st)}</span>`;
+  modal(`<h2>${esc(S.name || "Account")}</h2><p class="meta">Signed in as ${esc(S.admin ? "owner" : S.role)} on this device. Signing in somewhere else signs this device out.</p>
+    ${S.admin ? `<div class="row" style="margin:6px 0 14px"><button class="btn gold" id="openReview">Review queue${S.queue.length ? " (" + S.queue.length + ")" : ""}</button><button class="btn" id="openScouts">Scouts (${S.scouts.length})</button></div>` : ""}
+    <h3>Your suggestions</h3>
+    ${mine.length ? mine.map(m => `<div class="sg"><div><b>${esc(m["Target name"] || (m.Kind === "add" ? "New spot" : ""))}</b> ${pill(m.Status)}</div><div class="meta">${esc(m.Kind === "edit" ? (m.Field + " → " + m.Suggested) : m.Kind === "closed" ? "Reported closed" : "New spot")} · ${esc(m.Time)}${m["Review note"] ? " · " + esc(m["Review note"]) : ""}</div></div>`).join("") : `<p class="meta">None yet. Open any venue, promoter or outlet and tap <b>Suggest an edit</b>, or use <b>+ Add a spot</b>.</p>`}
+    <div class="row"><button class="btn" data-close>Close</button><button class="btn" id="signOut">Sign out</button></div>`);
+  $("#signOut").onclick = async () => { try { await post({ action: "logout" }); } catch (_) {} S.t = ""; store.set("zen-t", ""); closeModal(); location.reload(); };
+  const r = $("#openReview"); if (r) r.onclick = review;
+  const sc = $("#openScouts"); if (sc) sc.onclick = () => modal(`<h2>Scouts</h2><p class="meta">Invite or remove scouts in the <b>ZEN_Users</b> tab of your Google Sheet (Role = scout, Status = active or off).</p>
+    ${S.scouts.length ? S.scouts.map(u => `<div class="sg"><div><b>${esc(u.name || u.email)}</b> <span class="tag">${esc(u.role || "scout")}</span> <span class="tag ${/^(active|on|yes|)$/i.test(u.status || "") ? "ok" : "no"}">${esc(u.status || "active")}</span></div><div class="meta">${esc(u.email)}${u.city ? " · " + esc(u.city) : ""}${u.last ? " · last in " + esc(u.last) : " · hasn't signed in yet"}</div></div>`).join("") : `<p class="meta">No scouts yet.</p>`}
+    <div class="row"><button class="btn" data-close>Close</button></div>`);
+}
+
+/* ---------------- suggestions (scouts + owner) ---------------- */
+const SUGG_FIELDS = {
+  ZENTES_WORLD_Venues: ["Name", "Type", "Neighborhood", "Address", "Capacity", "Sq ft", "Sound system", "Indoor / Outdoor", "Curfew", "Alcohol", "Website", "Instagram", "Opened", "Genres / vibe", "Public description"],
+  ZENTES_WORLD_Promoters: ["Name", "Type", "Genres", "Home venues", "Event series", "Website", "Instagram", "Key people", "Last event seen", "Status", "Public description"],
+  ZENTES_WORLD_Media: ["Name", "Type", "Focus", "Website", "Instagram", "Submit / contact"]
+};
+const canSuggest = () => !S.present && S.role && S.role !== "client";
+function suggest(tab, target) {
+  // target: {id, name, city, get(field)}
+  const fields = SUGG_FIELDS[tab];
+  modal(`<h2>Suggest an edit</h2><p class="meta"><b>${esc(target.name)}</b>${target.city ? " · " + esc(target.city) : ""}. Nothing changes on the map until Thomas approves it.</p>
+    <div class="seg2"><button class="on" data-k="edit">Fix or add info</button><button data-k="closed">It's closed</button></div>
+    <div id="sgEdit"><label class="meta">What's wrong or missing?</label><select id="sgField">${fields.map(f => `<option>${esc(f)}</option>`).join("")}</select>
+      <label class="meta">Currently</label><div class="cur" id="sgCur"></div>
+      <label class="meta">Should be</label><textarea id="sgVal" rows="2"></textarea></div>
+    <label class="meta">How do you know? (optional)</label><input id="sgNote" placeholder="e.g. I was there Saturday / their IG says…">
+    <label class="meta">Source link (optional)</label><input id="sgSrc" placeholder="https://">
+    <div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="sgGo">Send suggestion</button></div>`);
+  let kind = "edit";
+  const cur = () => { $("#sgCur").textContent = target.get($("#sgField").value) || "— (empty)"; };
+  cur(); $("#sgField").onchange = cur;
+  $("#mbox").querySelectorAll(".seg2 button").forEach(b => b.onclick = () => { kind = b.dataset.k; $("#mbox").querySelectorAll(".seg2 button").forEach(x => x.classList.toggle("on", x === b)); $("#sgEdit").hidden = kind !== "edit"; });
+  $("#sgGo").onclick = async () => {
+    const field = $("#sgField").value, val = $("#sgVal").value.trim();
+    if (kind === "edit" && !val) { toast("Add what it should be."); return; }
+    $("#sgGo").disabled = true;
+    try { const j = await post({ action: "suggest", kind, tab, targetId: target.id || "", targetName: target.name, city: target.city || "", field: kind === "edit" ? field : "Status", current: kind === "edit" ? (target.get(field) || "") : "", suggested: kind === "edit" ? val : "Closed", note: $("#sgNote").value.trim(), source: $("#sgSrc").value.trim() });
+      if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); load();
+    } catch (e) { toast((e && e.error) || "Couldn't send it. Try again."); $("#sgGo").disabled = false; }
+  };
+}
+function addSpot() {
+  const cities = [...new Set(S.venues.map(v => v.city).filter(Boolean))].sort();
+  modal(`<h2>Add a spot</h2><p class="meta">A venue, warehouse, promoter or blog that should be on the map. Thomas reviews every addition.</p>
+    <div class="seg2"><button class="on" data-t="ZENTES_WORLD_Venues">Venue / space</button><button data-t="ZENTES_WORLD_Promoters">Promoter / collective</button><button data-t="ZENTES_WORLD_Media">Media / blog</button></div>
+    <label class="meta">Name</label><input id="adName">
+    <label class="meta">City</label><input id="adCity" list="adCities" value="${esc(S.f.city || "")}"><datalist id="adCities">${cities.map(c => `<option>${esc(c)}</option>`).join("")}</datalist>
+    <label class="meta">Type</label><input id="adType" placeholder="Club, warehouse, rooftop / collective, party series / blog, radio…">
+    <div id="adVenueOnly"><label class="meta">Address or neighborhood</label><input id="adAddr"><label class="meta">Capacity (approx.)</label><input id="adCap" inputmode="numeric"></div>
+    <label class="meta">Website</label><input id="adWeb" placeholder="https://"><label class="meta">Instagram</label><input id="adIg" placeholder="@handle">
+    <label class="meta">Why it belongs here</label><textarea id="adNote" rows="2" placeholder="What happens there, who runs it, genres…"></textarea>
+    <div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="adGo">Send for review</button></div>`);
+  let tab = "ZENTES_WORLD_Venues";
+  $("#mbox").querySelectorAll(".seg2 button").forEach(b => b.onclick = () => { tab = b.dataset.t; $("#mbox").querySelectorAll(".seg2 button").forEach(x => x.classList.toggle("on", x === b)); $("#adVenueOnly").hidden = tab !== "ZENTES_WORLD_Venues"; });
+  $("#adGo").onclick = async () => {
+    const g = id => $(id).value.trim(); const name = g("#adName"), city = g("#adCity"); if (!name || !city) { toast("Name and city, please."); return; }
+    const values = { Name: name, City: city, Type: g("#adType"), Website: g("#adWeb"), Instagram: g("#adIg") };
+    if (tab === "ZENTES_WORLD_Venues") Object.assign(values, { Address: g("#adAddr"), Capacity: g("#adCap"), "Public description": g("#adNote") });
+    else if (tab === "ZENTES_WORLD_Promoters") values["Public description"] = g("#adNote"); else values.Focus = g("#adNote");
+    $("#adGo").disabled = true;
+    try { const j = await post({ action: "suggest", kind: "add", tab, targetName: name, city, values, note: g("#adNote") }); if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); load(); }
+    catch (e) { toast((e && e.error) || "Couldn't send it."); $("#adGo").disabled = false; }
+  };
+}
+function review() {
+  const q = S.queue;
+  const TABN = { ZENTES_WORLD_Venues: "Venue", ZENTES_WORLD_Promoters: "Promoter", ZENTES_WORLD_Media: "Media" };
+  const body = it => { if (it.Kind === "add") { let v = {}; try { v = JSON.parse(it.Suggested || "{}"); } catch (_) {} return `<div class="meta">New ${esc((TABN[it.Tab] || "").toLowerCase())}: ${Object.entries(v).filter(([, x]) => x).map(([k, x]) => `<b>${esc(k)}</b> ${esc(x)}`).join(" · ")}</div>`; }
+    if (it.Kind === "closed") return `<div class="meta">Reported <b>closed</b></div>`;
+    return `<div class="meta"><b>${esc(it.Field)}</b>: <s>${esc(it.Current || "empty")}</s></div><input class="rvVal" data-id="${esc(it.ID)}" value="${esc(it.Suggested)}">`; };
+  modal(`<h2>Review queue</h2><p class="meta">Approve writes the change straight to your sheet and stamps it verified. You can tweak a suggested value before approving.</p>
+    ${q.length ? q.map(it => `<div class="sg rv" data-rv="${esc(it.ID)}"><div><span class="tag">${esc(TABN[it.Tab] || "")}</span><b>${esc(it["Target name"])}</b>${it.City ? " · " + esc(it.City) : ""}</div>${body(it)}
+      <div class="meta">from ${esc(it.Scout || it.Email)} · ${esc(it.Time)}${it.Note ? " · “" + esc(it.Note) + "”" : ""}${it.Source ? ` · <a href="${esc(it.Source)}" target="_blank" rel="noopener">source ↗</a>` : ""}</div>
+      <div class="row"><button class="btn sm" data-dec="reject">Reject</button><button class="btn sm gold" data-dec="approve">Approve</button></div></div>`).join("") : `<p class="meta">Nothing waiting. 🎉</p>`}
+    <div class="row"><button class="btn" data-close>Close</button></div>`);
+  $("#mbox").querySelectorAll("[data-dec]").forEach(b => b.onclick = async () => {
+    const box = b.closest("[data-rv]"), id = box.dataset.rv, inp = box.querySelector(".rvVal");
+    box.querySelectorAll("button").forEach(x => x.disabled = true);
+    try { const j = await post({ action: "decide", id, decision: b.dataset.dec, value: inp ? inp.value.trim() : undefined }); if (!j.ok) throw j;
+      box.innerHTML = `<div class="meta">${b.dataset.dec === "approve" ? "Approved ✓" : "Rejected"}</div>`; S.queue = S.queue.filter(x => x.ID !== id);
+      if (!S.queue.length) { setTimeout(() => { closeModal(); load(); }, 600); }
+    } catch (e) { toast((e && e.error) || "Couldn't save that."); box.querySelectorAll("button").forEach(x => x.disabled = false); }
+  });
+  $("#modal").dataset.reload = "1";
 }
 function modal(html) { $("#mbox").innerHTML = html; $("#modal").hidden = false; }
-function closeModal() { $("#modal").hidden = true; }
+function closeModal() { $("#modal").hidden = true; if ($("#modal").dataset.reload) { delete $("#modal").dataset.reload; load(); } }
 function csv() {
   const vs = visible(); const keys = Object.keys(KEYHEAD).filter(k => k !== "id" && k !== "score");
   const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
@@ -382,7 +511,7 @@ function csv() {
 function wire() {
   const brand = (!C.BRAND || /^(ZENTE ATLAS|Z ATLAS)$/i.test(C.BRAND)) ? "ZEN ATLAS" : C.BRAND; const tag = (!C.TAGLINE || /^Venues & spaces/i.test(C.TAGLINE)) ? "An Interactive Map of Venues & Spaces" : C.TAGLINE;
   $("#brand").textContent = brand; $("#tagline").textContent = tag; document.title = brand + " — " + tag;
-  if (S.present) { $("#ownerBtn").hidden = true; $("#shareBtn").hidden = true; const n = $("#presentNote"); n.hidden = false; n.innerHTML = `A curated selection${S.f.city ? " in " + esc(S.f.city) : ""}. Tap a venue for details${C.CONTACT_EMAIL ? `, or <a href="mailto:${esc(C.CONTACT_EMAIL)}">get in touch</a>` : ""}.`; }
+  if (S.present || S.share) { $("#ownerBtn").hidden = true; $("#shareBtn").hidden = true; $("#addBtn").hidden = true; const n = $("#presentNote"); n.hidden = false; n.innerHTML = `A curated selection${S.f.city ? " in " + esc(S.f.city) : ""}. Tap a venue for details${C.CONTACT_EMAIL ? `, or <a href="mailto:${esc(C.CONTACT_EMAIL)}">get in touch</a>` : ""}.`; }
   $("#cities").onclick = e => { const b = e.target.closest("[data-city]"); if (!b) return; S.f.city = b.dataset.city; S.f.types.clear(); render(); pushMap(); if (S.f.city) fitCity(S.f.city); };
   $("#types").onclick = e => { const b = e.target.closest("[data-type]"); if (!b) return; const t = b.dataset.type; S.f.types.has(t) ? S.f.types.delete(t) : S.f.types.add(t); render(); pushMap(); };
   $("#cap").onchange = e => { S.f.cap = e.target.value; render(); pushMap(); };
@@ -391,7 +520,8 @@ function wire() {
   $("#status").onchange = e => { S.f.status = e.target.value; render(); pushMap(); };
   $("#q").oninput = e => { S.f.q = e.target.value; render(); pushMap(); };
   $("#q").onkeydown = e => { if (e.key === "Enter" && S.f.q.trim() && !visible().length) { const q = S.f.q.trim(); S.f.q = ""; e.target.value = ""; render(); pushMap(); goPlace(q); } };
-  $("#views").onclick = e => { const b = e.target.closest("[data-view]"); if (!b) return; S.view = b.dataset.view; S.selScene = null; $("#detail").hidden = true; render(); };
+  $("#views").onclick = e => { const b = e.target.closest("[data-view]"); if (!b) return; S.view = b.dataset.view; S.selScene = null; S.hl = null; $("#detail").hidden = true; render(); pushMap(); };
+  $("#addBtn").onclick = addSpot;
   $("#list").onclick = e => { const sc = e.target.closest("[data-scene]"); if (sc) { const x = (S._sceneShown || [])[+sc.dataset.scene]; if (x) openScene(x); return; } const p = e.target.closest("[data-pick]"); if (p) { e.stopPropagation(); p.checked ? S.picked.add(p.dataset.pick) : S.picked.delete(p.dataset.pick); render(); return; } const c = e.target.closest("[data-id]"); if (c) open(c.dataset.id); };
   $("#shareBtn").onclick = share; $("#ownerBtn").onclick = owner; $("#scoutBtn").onclick = scout; $("#csvBtn").onclick = csv;
   $("#modal").onclick = e => { if (e.target.id === "modal" || e.target.closest("[data-close]")) closeModal(); };

@@ -89,3 +89,32 @@ select{background:var(--s1);border:1px solid var(--line);border-radius:8px;paddi
 .views .vt.on{border-color:var(--gold2);color:var(--text);background:var(--s1)}
 .views .vt small{color:var(--faint);margin-left:3px}
 #detail .card{cursor:pointer;margin:4px 0}
+
+/* invite-only gate, account, suggestions */
+#gate{position:fixed;inset:0;z-index:50;background:radial-gradient(ellipse at 50% 30%,#16151a 0%,#0a0a0c 70%);display:flex;align-items:center;justify-content:center;padding:24px}
+#gate[hidden]{display:none!important}
+#gate .gbox{width:100%;max-width:380px;text-align:center}
+#gate .logo{font-family:Cinzel,serif;letter-spacing:.32em;font-size:22px;color:var(--gold,#c9a961)}
+#gate .tagline{font-family:'Cormorant Garamond',serif;font-style:italic;color:#8d8c94;margin:6px 0 22px;font-size:17px}
+#gate input{width:100%;margin:0 0 10px;text-align:center;font-size:15px}
+#gate .btn{width:100%;margin-bottom:8px}
+#gate .faint{opacity:.6;margin-top:18px}
+#gate a{color:inherit}
+body.gated #app{filter:blur(6px);pointer-events:none}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:#c9a961;color:#0a0a0c;font-size:11px;line-height:18px;text-align:center;margin-left:4px}
+.ver{font-size:12px;color:#7fa88a;margin:6px 0 2px}
+.ver.old{color:#8d8c94}
+.sg{border-top:1px solid #26262c;padding:10px 0}
+.sg:first-of-type{border-top:0}
+.sg .row{margin-top:8px;justify-content:flex-end}
+.sg input.rvVal{margin-top:6px}
+.tag.ok{border-color:#4f6b55;color:#7fa88a}
+.tag.no{border-color:#5a3e2c;color:#c98a61}
+.seg2{display:flex;gap:4px;margin:6px 0 12px;flex-wrap:wrap}
+.seg2 button{flex:1;background:transparent;border:1px solid #34343b;border-radius:8px;padding:7px 6px;color:#8d8c94;cursor:pointer;font:500 12px Inter,sans-serif}
+.seg2 button.on{border-color:#c9a961;color:#ecebe6}
+.cur{font-size:13px;color:#8d8c94;padding:6px 0 10px;white-space:pre-wrap}
+#mbox h3{font-family:Cinzel,serif;font-weight:500;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#c9a961;margin:16px 0 6px}
+#mbox textarea{width:100%}
+.mbox input:not([type=checkbox]):not([type=radio]),.mbox select,.mbox textarea,#gate input{width:100%;background:var(--s2,#18181c);border:1px solid var(--line,#26262c);border-radius:10px;padding:10px 12px;outline:none;margin:6px 0 10px;color:inherit;font:inherit}
+.mbox input:focus,.mbox select:focus,.mbox textarea:focus,#gate input:focus{border-color:var(--gold2,#8a7543)}

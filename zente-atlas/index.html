@@ -16,8 +16,9 @@
     <header class="brand">
       <div><div class="logo" id="brand">ZEN ATLAS</div><div class="tagline" id="tagline">An Interactive Map of Venues &amp; Spaces</div></div>
       <div class="hdr-actions">
-        <button class="ic" id="shareBtn" title="Share">Share</button>
-        <button class="ic" id="ownerBtn" title="Owner sign-in">Owner</button>
+        <button class="ic scout-only" id="addBtn" title="Suggest a new venue, promoter or blog" hidden>+ Add</button>
+        <button class="ic owner-only" id="shareBtn" title="Share with a client" hidden>Share</button>
+        <button class="ic" id="ownerBtn" title="Your account">Account</button>
       </div>
     </header>
     <div id="presentNote" class="present-note" hidden></div>
@@ -51,6 +52,7 @@
   </main>
 </div>
 <div id="modal" hidden><div class="mbox" id="mbox"></div></div>
+<div id="gate" hidden><div class="gbox"></div></div>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>

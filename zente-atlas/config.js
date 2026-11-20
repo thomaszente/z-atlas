@@ -6,7 +6,7 @@ window.ATLAS_CONFIG = {
 
   // Paste your Google Apps Script web-app URL here (see README, step 2).
   // Empty = the app uses the public starter list in venues.json.
-  SHEET_API: "",
+  SHEET_API: "https://script.google.com/macros/s/AKfycbzWZAp4sCPpGHIWYOfzdB7MDFmiOKLfLWT6OKNu08IHSbIkoVUmKMQ7qNHRSa9vj7zx/exec",
 
   // Map start position [lng, lat] and zoom (Austin).
   CENTER: [-97.7431, 30.2672],
