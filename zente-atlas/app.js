@@ -19,7 +19,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 const params = new URLSearchParams(location.search);
 
 const S = {
-  venues: [], admin: false, t: store.get("zen-t", ""), role: "", name: "", queue: [], mine: [], scouts: [], hl: null, share: params.get("share") || "", source: "",
+  venues: [], admin: false, key: store.get("atlas-key", ""), role: "", queue: [], hl: null, share: params.get("share") || "", source: "",
   f: { city: params.get("city") || "", types: new Set(), cap: "", io: "", late: false, q: "", status: "" },
   sel: null, picked: new Set((params.get("ids") || "").split(",").filter(Boolean)),
   present: params.get("present") === "1", scout: [], map: null, mapReady: false,
@@ -35,13 +35,14 @@ async function load() {
   if (!C.SHEET_API) { gate("ZEN ATLAS isn't connected to its data yet."); return; }
   try {
     const sep = C.SHEET_API.includes("?") ? "&" : "?";
-    const u = C.SHEET_API + sep + (S.share ? "share=" + encodeURIComponent(S.share) : "t=" + encodeURIComponent(S.t));
+    const u = C.SHEET_API + (S.share ? sep + "share=" + encodeURIComponent(S.share) : S.key ? sep + "key=" + encodeURIComponent(S.key) : "");
     const r = await fetch(u); const j = await r.json();
-    if (!j.auth) { if (S.share) { gate("This shared link has expired. Ask for a new one."); return; } if (S.t) { S.t = ""; store.set("zen-t", ""); } gate(); return; }
+    if (!j.auth) { gate(S.share ? "This shared link has expired. Ask for a new one." : "Couldn't load the map."); return; }
     hideGate();
-    rows = (j.venues || []).map(fromSheetRow); S.role = j.role || ""; S.name = j.name || ""; S.admin = j.role === "owner";
+    rows = (j.venues || []).map(fromSheetRow); S.role = j.role || ""; S.admin = !!j.admin;
+    if (S.key && !j.admin && !S.share) toast("Owner key not accepted — showing the public view.");
     S.promoters = (j.promoters || []).filter(p => p.Name); S.media = (j.media || []).filter(m => m.Name);
-    S.queue = j.queue || []; S.mine = j.mine || []; S.scouts = j.scouts || [];
+    S.queue = j.queue || [];
     S.source = "Live" + (j.updated ? " · " + new Date(j.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
   } catch (e) { gate("Couldn't reach ZEN ATLAS right now. Check your connection and try again."); return; }
   if (S.present || S.share) { S.present = true; S.admin = false; }
@@ -53,10 +54,10 @@ async function load() {
     return { ...v, _id: id, _lat: lat, _lng: lng };
   });
   document.querySelectorAll(".owner-only").forEach(el => el.hidden = !S.admin);
-  document.querySelectorAll(".scout-only").forEach(el => el.hidden = S.present || !S.role || S.role === "client");
+  document.querySelectorAll(".scout-only").forEach(el => el.hidden = S.present);
   const ab = $("#ownerBtn"); ab.hidden = S.present; ab.classList.toggle("on", S.admin);
-  ab.innerHTML = esc(S.admin ? "Owner" : (S.name || "Account").split(" ")[0]) + (S.admin && S.queue.length ? ` <b class="badge">${S.queue.length}</b>` : "");
-  $("#src").textContent = S.source + (S.admin ? " · owner view" : S.role ? " · " + S.role : "");
+  ab.innerHTML = (S.admin ? "Owner ✓" : "Owner") + (S.admin && S.queue.length ? ` <b class="badge">${S.queue.length}</b>` : "");
+  $("#src").textContent = S.source + (S.admin ? " · owner view" : "");
   if (S.mapReady) S.map.setPaintProperty("pts", "circle-color", S.admin ? statusMatch : typeMatch);
   render(); pushMap(); geocodeMissing();
   if (S.f.city) fitCity(S.f.city);
@@ -65,24 +66,8 @@ async function load() {
 /* ---------------- sign-in gate (invite-only) ---------------- */
 function gate(msg) {
   const g = $("#gate"); g.hidden = false; document.body.classList.add("gated");
-  const em = store.get("zen-email", "");
-  g.querySelector(".gbox").innerHTML = `<div class="logo">${esc($("#brand").textContent)}</div><div class="tagline">${esc($("#tagline").textContent)}</div>
-    ${msg ? `<p class="meta">${esc(msg)}</p>` : `<p class="meta">Invite-only beta. Sign in with the email you were invited with — we'll send you a one-time code.</p>`}
-    ${S.share && msg ? "" : `<div id="gStep1"><input type="email" id="gEmail" placeholder="you@email.com" value="${esc(em)}" autocomplete="email"><button class="btn gold" id="gSend">Send code</button></div>
-    <div id="gStep2" hidden><input inputmode="numeric" id="gCode" placeholder="6-digit code" maxlength="6" autocomplete="one-time-code"><button class="btn gold" id="gVerify">Sign in</button><button class="btn" id="gBack">Use a different email</button></div>
-    <p class="meta" id="gMsg"></p><p class="meta faint">Want in? Write to <a href="mailto:${esc(C.CONTACT_EMAIL || "")}?subject=ZEN%20ATLAS%20beta">${esc(C.CONTACT_EMAIL || "")}</a>.</p>`}`;
-  const send = $("#gSend"); if (!send) return;
-  const say = t => $("#gMsg").textContent = t;
-  const doSend = async () => { const email = $("#gEmail").value.trim().toLowerCase(); if (!email) return; send.disabled = true; say("Sending…");
-    try { const j = await post({ action: "requestCode", email }); if (!j.ok) { say(j.error || "Couldn't send a code."); send.disabled = false; return; }
-      store.set("zen-email", email); $("#gStep1").hidden = true; $("#gStep2").hidden = false; say(j.message + " Check your inbox (and spam)."); setTimeout(() => $("#gCode").focus(), 30);
-    } catch (_) { say("Couldn't reach ZEN ATLAS. Try again."); } send.disabled = false; };
-  const doVerify = async () => { const code = $("#gCode").value.trim(); if (code.length < 6) return; $("#gVerify").disabled = true; say("Checking…");
-    try { const j = await post({ action: "verifyCode", email: store.get("zen-email", ""), code }); if (!j.ok) { say(j.error || "That didn't work."); $("#gVerify").disabled = false; return; }
-      S.t = j.token; store.set("zen-t", S.t); say(""); load(); } catch (_) { say("Couldn't reach ZEN ATLAS. Try again."); $("#gVerify").disabled = false; } };
-  send.onclick = doSend; $("#gEmail").onkeydown = e => { if (e.key === "Enter") doSend(); };
-  $("#gVerify").onclick = doVerify; $("#gCode").onkeydown = e => { if (e.key === "Enter") doVerify(); };
-  $("#gBack").onclick = () => { $("#gStep1").hidden = false; $("#gStep2").hidden = true; say(""); };
+  g.querySelector(".gbox").innerHTML = `<div class="logo">${esc($("#brand").textContent)}</div><div class="tagline">${esc($("#tagline").textContent)}</div><p class="meta">${esc(msg || "")}</p>
+    ${S.share ? "" : `<button class="btn gold" onclick="location.reload()">Try again</button>`}`;
 }
 function hideGate() { $("#gate").hidden = true; document.body.classList.remove("gated"); }
 
@@ -104,7 +89,7 @@ async function geocodeMissing() {
   geoBusy = false; render();
 }
 async function post(body) {
-  const r = await fetch(C.SHEET_API, { method: "POST", body: JSON.stringify({ ...body, t: S.t }) });
+  const r = await fetch(C.SHEET_API, { method: "POST", body: JSON.stringify({ ...body, key: S.key }) });
   return r.json();
 }
 function saveCoords(v) { if (!S.admin) return; post({ action: "setCoords", id: v.id, lat: v._lat, lng: v._lng }).catch(() => {}); }
@@ -409,18 +394,18 @@ function share() {
     } catch (_) { toast("Couldn't create the link."); btn.textContent = "Create link"; } btn.disabled = false; };
 }
 function owner() {
-  const mine = S.mine.slice(0, 20);
-  const pill = st => `<span class="tag ${st === "Approved" ? "ok" : st === "Rejected" ? "no" : ""}">${esc(st)}</span>`;
-  modal(`<h2>${esc(S.name || "Account")}</h2><p class="meta">Signed in as ${esc(S.admin ? "owner" : S.role)} on this device. Signing in somewhere else signs this device out.</p>
-    ${S.admin ? `<div class="row" style="margin:6px 0 14px"><button class="btn gold" id="openReview">Review queue${S.queue.length ? " (" + S.queue.length + ")" : ""}</button><button class="btn" id="openScouts">Scouts (${S.scouts.length})</button></div>` : ""}
-    <h3>Your suggestions</h3>
-    ${mine.length ? mine.map(m => `<div class="sg"><div><b>${esc(m["Target name"] || (m.Kind === "add" ? "New spot" : ""))}</b> ${pill(m.Status)}</div><div class="meta">${esc(m.Kind === "edit" ? (m.Field + " → " + m.Suggested) : m.Kind === "closed" ? "Reported closed" : "New spot")} · ${esc(m.Time)}${m["Review note"] ? " · " + esc(m["Review note"]) : ""}</div></div>`).join("") : `<p class="meta">None yet. Open any venue, promoter or outlet and tap <b>Suggest an edit</b>, or use <b>+ Add a spot</b>.</p>`}
-    <div class="row"><button class="btn" data-close>Close</button><button class="btn" id="signOut">Sign out</button></div>`);
-  $("#signOut").onclick = async () => { try { await post({ action: "logout" }); } catch (_) {} S.t = ""; store.set("zen-t", ""); closeModal(); location.reload(); };
-  const r = $("#openReview"); if (r) r.onclick = review;
-  const sc = $("#openScouts"); if (sc) sc.onclick = () => modal(`<h2>Scouts</h2><p class="meta">Invite or remove scouts in the <b>ZEN_Users</b> tab of your Google Sheet (Role = scout, Status = active or off).</p>
-    ${S.scouts.length ? S.scouts.map(u => `<div class="sg"><div><b>${esc(u.name || u.email)}</b> <span class="tag">${esc(u.role || "scout")}</span> <span class="tag ${/^(active|on|yes|)$/i.test(u.status || "") ? "ok" : "no"}">${esc(u.status || "active")}</span></div><div class="meta">${esc(u.email)}${u.city ? " · " + esc(u.city) : ""}${u.last ? " · last in " + esc(u.last) : " · hasn't signed in yet"}</div></div>`).join("") : `<p class="meta">No scouts yet.</p>`}
-    <div class="row"><button class="btn" data-close>Close</button></div>`);
+  if (S.admin) {
+    modal(`<h2>Owner view</h2><p class="meta">You're signed in on this device.</p>
+      <div class="row" style="margin:6px 0 14px"><button class="btn gold" id="openReview">Review queue${S.queue.length ? " (" + S.queue.length + ")" : ""}</button></div>
+      <div class="row"><button class="btn" data-close>Close</button><button class="btn" id="signOut">Sign out</button></div>`);
+    $("#signOut").onclick = () => { S.key = ""; store.set("atlas-key", ""); closeModal(); load(); };
+    $("#openReview").onclick = review; return;
+  }
+  modal(`<h2>Owner sign-in</h2><p class="meta">Enter your owner key to see private intel, the review queue and scouting tools on this device.</p>
+    <input type="password" id="keyIn" placeholder="Owner key" autocomplete="current-password"><div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="keyGo">Sign in</button></div>`);
+  setTimeout(() => $("#keyIn").focus(), 30);
+  const go = () => { S.key = $("#keyIn").value.trim(); store.set("atlas-key", S.key); closeModal(); load(); };
+  $("#keyGo").onclick = go; $("#keyIn").onkeydown = e => { if (e.key === "Enter") go(); };
 }
 
 /* ---------------- suggestions (scouts + owner) ---------------- */
@@ -429,17 +414,19 @@ const SUGG_FIELDS = {
   ZENTES_WORLD_Promoters: ["Name", "Type", "Genres", "Home venues", "Event series", "Website", "Instagram", "Key people", "Last event seen", "Status", "Public description"],
   ZENTES_WORLD_Media: ["Name", "Type", "Focus", "Website", "Instagram", "Submit / contact"]
 };
-const canSuggest = () => !S.present && S.role && S.role !== "client";
+const canSuggest = () => !S.present;
+const whoFields = () => S.admin ? "" : `<label class="meta">Your name</label><input id="sgWho" value="${esc(store.get("zen-who", ""))}" placeholder="So Thomas knows who sent it"><label class="meta">Email (optional)</label><input id="sgMail" type="email" value="${esc(store.get("zen-mail", ""))}" placeholder="Only if you'd like a reply">`;
+function whoVals() { if (S.admin) return { name: "Thomas", email: "" }; const name = ($("#sgWho") || {}).value?.trim() || "", email = ($("#sgMail") || {}).value?.trim() || ""; store.set("zen-who", name); store.set("zen-mail", email); return { name, email }; }
 function suggest(tab, target) {
   // target: {id, name, city, get(field)}
   const fields = SUGG_FIELDS[tab];
-  modal(`<h2>Suggest an edit</h2><p class="meta"><b>${esc(target.name)}</b>${target.city ? " · " + esc(target.city) : ""}. Nothing changes on the map until Thomas approves it.</p>
+  modal(`<h2>Suggest an edit</h2><p class="meta"><b>${esc(target.name)}</b>${target.city ? " · " + esc(target.city) : ""}. Nothing changes on the map until it's reviewed.</p>
     <div class="seg2"><button class="on" data-k="edit">Fix or add info</button><button data-k="closed">It's closed</button></div>
     <div id="sgEdit"><label class="meta">What's wrong or missing?</label><select id="sgField">${fields.map(f => `<option>${esc(f)}</option>`).join("")}</select>
       <label class="meta">Currently</label><div class="cur" id="sgCur"></div>
       <label class="meta">Should be</label><textarea id="sgVal" rows="2"></textarea></div>
     <label class="meta">How do you know? (optional)</label><input id="sgNote" placeholder="e.g. I was there Saturday / their IG says…">
-    <label class="meta">Source link (optional)</label><input id="sgSrc" placeholder="https://">
+    <label class="meta">Source link (optional)</label><input id="sgSrc" placeholder="https://">${whoFields()}
     <div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="sgGo">Send suggestion</button></div>`);
   let kind = "edit";
   const cur = () => { $("#sgCur").textContent = target.get($("#sgField").value) || "— (empty)"; };
@@ -448,32 +435,34 @@ function suggest(tab, target) {
   $("#sgGo").onclick = async () => {
     const field = $("#sgField").value, val = $("#sgVal").value.trim();
     if (kind === "edit" && !val) { toast("Add what it should be."); return; }
+    const who = whoVals(); if (!who.name) { toast("Add your name, please."); return; }
     $("#sgGo").disabled = true;
-    try { const j = await post({ action: "suggest", kind, tab, targetId: target.id || "", targetName: target.name, city: target.city || "", field: kind === "edit" ? field : "Status", current: kind === "edit" ? (target.get(field) || "") : "", suggested: kind === "edit" ? val : "Closed", note: $("#sgNote").value.trim(), source: $("#sgSrc").value.trim() });
-      if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); load();
+    try { const j = await post({ action: "suggest", ...who, kind, tab, targetId: target.id || "", targetName: target.name, city: target.city || "", field: kind === "edit" ? field : "Status", current: kind === "edit" ? (target.get(field) || "") : "", suggested: kind === "edit" ? val : "Closed", note: $("#sgNote").value.trim(), source: $("#sgSrc").value.trim() });
+      if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); if (S.admin) load();
     } catch (e) { toast((e && e.error) || "Couldn't send it. Try again."); $("#sgGo").disabled = false; }
   };
 }
 function addSpot() {
   const cities = [...new Set(S.venues.map(v => v.city).filter(Boolean))].sort();
-  modal(`<h2>Add a spot</h2><p class="meta">A venue, warehouse, promoter or blog that should be on the map. Thomas reviews every addition.</p>
+  modal(`<h2>Add a spot</h2><p class="meta">A venue, warehouse, promoter or blog that should be on the map. Every addition is reviewed first.</p>
     <div class="seg2"><button class="on" data-t="ZENTES_WORLD_Venues">Venue / space</button><button data-t="ZENTES_WORLD_Promoters">Promoter / collective</button><button data-t="ZENTES_WORLD_Media">Media / blog</button></div>
     <label class="meta">Name</label><input id="adName">
     <label class="meta">City</label><input id="adCity" list="adCities" value="${esc(S.f.city || "")}"><datalist id="adCities">${cities.map(c => `<option>${esc(c)}</option>`).join("")}</datalist>
     <label class="meta">Type</label><input id="adType" placeholder="Club, warehouse, rooftop / collective, party series / blog, radio…">
     <div id="adVenueOnly"><label class="meta">Address or neighborhood</label><input id="adAddr"><label class="meta">Capacity (approx.)</label><input id="adCap" inputmode="numeric"></div>
     <label class="meta">Website</label><input id="adWeb" placeholder="https://"><label class="meta">Instagram</label><input id="adIg" placeholder="@handle">
-    <label class="meta">Why it belongs here</label><textarea id="adNote" rows="2" placeholder="What happens there, who runs it, genres…"></textarea>
+    <label class="meta">Why it belongs here</label><textarea id="adNote" rows="2" placeholder="What happens there, who runs it, genres…"></textarea>${whoFields()}
     <div class="row"><button class="btn" data-close>Cancel</button><button class="btn gold" id="adGo">Send for review</button></div>`);
   let tab = "ZENTES_WORLD_Venues";
   $("#mbox").querySelectorAll(".seg2 button").forEach(b => b.onclick = () => { tab = b.dataset.t; $("#mbox").querySelectorAll(".seg2 button").forEach(x => x.classList.toggle("on", x === b)); $("#adVenueOnly").hidden = tab !== "ZENTES_WORLD_Venues"; });
   $("#adGo").onclick = async () => {
     const g = id => $(id).value.trim(); const name = g("#adName"), city = g("#adCity"); if (!name || !city) { toast("Name and city, please."); return; }
+    const who = whoVals(); if (!who.name) { toast("Add your name, please."); return; }
     const values = { Name: name, City: city, Type: g("#adType"), Website: g("#adWeb"), Instagram: g("#adIg") };
     if (tab === "ZENTES_WORLD_Venues") Object.assign(values, { Address: g("#adAddr"), Capacity: g("#adCap"), "Public description": g("#adNote") });
     else if (tab === "ZENTES_WORLD_Promoters") values["Public description"] = g("#adNote"); else values.Focus = g("#adNote");
     $("#adGo").disabled = true;
-    try { const j = await post({ action: "suggest", kind: "add", tab, targetName: name, city, values, note: g("#adNote") }); if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); load(); }
+    try { const j = await post({ action: "suggest", ...who, kind: "add", tab, targetName: name, city, values, note: g("#adNote") }); if (!j.ok) throw j; closeModal(); toast("Thanks — sent for review."); if (S.admin) load(); }
     catch (e) { toast((e && e.error) || "Couldn't send it."); $("#adGo").disabled = false; }
   };
 }
