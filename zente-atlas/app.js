@@ -1,4 +1,4 @@
-/* ZENTE ATLAS — venues & spaces map
+/* ZEN ATLAS — an interactive map of venues & spaces
    Data: your Google Sheet (via the Apps Script bridge) or the bundled venues.json.
    Private columns only ever arrive from the sheet when the owner key is supplied. */
 (() => {
@@ -380,7 +380,8 @@ function csv() {
 
 /* ---------------- wiring ---------------- */
 function wire() {
-  $("#brand").textContent = C.BRAND || "ZENTE ATLAS"; $("#tagline").textContent = C.TAGLINE || "Venues & spaces"; document.title = (C.BRAND || "ZENTE ATLAS") + " — Venues & Spaces";
+  const brand = (!C.BRAND || /^(ZENTE ATLAS|Z ATLAS)$/i.test(C.BRAND)) ? "ZEN ATLAS" : C.BRAND; const tag = (!C.TAGLINE || /^Venues & spaces/i.test(C.TAGLINE)) ? "An Interactive Map of Venues & Spaces" : C.TAGLINE;
+  $("#brand").textContent = brand; $("#tagline").textContent = tag; document.title = brand + " — " + tag;
   if (S.present) { $("#ownerBtn").hidden = true; $("#shareBtn").hidden = true; const n = $("#presentNote"); n.hidden = false; n.innerHTML = `A curated selection${S.f.city ? " in " + esc(S.f.city) : ""}. Tap a venue for details${C.CONTACT_EMAIL ? `, or <a href="mailto:${esc(C.CONTACT_EMAIL)}">get in touch</a>` : ""}.`; }
   $("#cities").onclick = e => { const b = e.target.closest("[data-city]"); if (!b) return; S.f.city = b.dataset.city; S.f.types.clear(); render(); pushMap(); if (S.f.city) fitCity(S.f.city); };
   $("#types").onclick = e => { const b = e.target.closest("[data-type]"); if (!b) return; const t = b.dataset.type; S.f.types.has(t) ? S.f.types.delete(t) : S.f.types.add(t); render(); pushMap(); };

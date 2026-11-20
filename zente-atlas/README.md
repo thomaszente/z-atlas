@@ -1,4 +1,4 @@
-# ZENTE ATLAS — Venues & Spaces
+# ZEN ATLAS — An Interactive Map of Venues & Spaces
 
 Your own venue map: a dark street map of clubs, event spaces and venues in every city, with a private owner view for business intel and a clean client view you can share.
 
@@ -14,7 +14,7 @@ Your own venue map: a dark street map of clubs, event spaces and venues in every
 ## How the pieces fit
 
 ```
-ZENTE'S WORLD (Venues tab)  ⇄  Google Sheet tab "ZENTES_WORLD_Venues"  ⇄  ZENTE ATLAS
+ZENTE'S WORLD (Venues tab)  ⇄  Google Sheet tab "ZENTES_WORLD_Venues"  ⇄  ZEN ATLAS
    edit, score, research          the single source of truth                 map, clients
 ```
 
@@ -32,7 +32,7 @@ Create a GitHub repo named `zente-atlas`, upload this folder, then in Vercel cho
 
 1. In ZENTE'S WORLD → Venues, tap **⇄ Sync with Google Sheet** once. This creates the `ZENTES_WORLD_Venues` tab.
 2. Open the sheet → **Extensions → Apps Script**. Delete what's there, paste `apps-script/Code.gs`, and save.
-3. Reload the sheet. A **ZENTE Atlas** menu appears. Run **Set owner key…** and choose a long passphrase.
+3. Reload the sheet. A **ZEN Atlas** menu appears. Run **Set owner key…** and choose a long passphrase.
 4. Run **Fill missing map coordinates**. This puts every venue on the map using Google's geocoder.
 5. Run **Update Texas liquor sales**. This fills monthly liquor sales for Texas venues from Texas Comptroller data.
 6. In Apps Script: **Deploy → New deployment → Web app**. Set Execute as: **Me**. Set Who has access: **Anyone**. Copy the web-app URL.

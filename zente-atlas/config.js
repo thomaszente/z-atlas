@@ -1,12 +1,12 @@
-// ZENTE ATLAS — settings. Edit these, redeploy, done.
+// ZEN ATLAS — settings. Edit these, redeploy, done.
 window.ATLAS_CONFIG = {
-  BRAND: "ZENTE ATLAS",
-  TAGLINE: "Venues & spaces, curated by Thomas Zente",
+  BRAND: "ZEN ATLAS",
+  TAGLINE: "An Interactive Map of Venues & Spaces",
   CONTACT_EMAIL: "thomaszente@gmail.com",
 
   // Paste your Google Apps Script web-app URL here (see README, step 2).
   // Empty = the app uses the public starter list in venues.json.
-  SHEET_API: "https://script.google.com/macros/s/AKfycbzWZAp4sCPpGHIWYOfzdB7MDFmiOKLfLWT6OKNu08IHSbIkoVUmKMQ7qNHRSa9vj7zx/exec",
+  SHEET_API: "",
 
   // Map start position [lng, lat] and zoom (Austin).
   CENTER: [-97.7431, 30.2672],
