@@ -83,3 +83,9 @@ select{background:var(--s1);border:1px solid var(--line);border-radius:8px;paddi
   #detail{top:auto;bottom:0;right:0;left:0;width:auto;max-width:none;height:85%;border-radius:16px 16px 0 0}
   #legend{display:none}
 }
+
+.views{display:flex;gap:4px;padding:0 16px 8px}
+.views .vt{flex:1;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 6px;font:500 12px Inter;cursor:pointer}
+.views .vt.on{border-color:var(--gold2);color:var(--text);background:var(--s1)}
+.views .vt small{color:var(--faint);margin-left:3px}
+#detail .card{cursor:pointer;margin:4px 0}

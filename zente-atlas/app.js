@@ -22,7 +22,8 @@ const S = {
   venues: [], admin: false, key: store.get("atlas-key", ""), source: "",
   f: { city: params.get("city") || "", types: new Set(), cap: "", io: "", late: false, q: "", status: "" },
   sel: null, picked: new Set((params.get("ids") || "").split(",").filter(Boolean)),
-  present: params.get("present") === "1", scout: [], map: null, mapReady: false
+  present: params.get("present") === "1", scout: [], map: null, mapReady: false,
+  promoters: [], media: [], view: params.get("view") || "venues", selScene: null
 };
 
 function toast(msg, ms = 3500) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, ms); }
@@ -36,6 +37,7 @@ async function load() {
       const u = C.SHEET_API + (S.key ? (C.SHEET_API.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(S.key) : "");
       const r = await fetch(u); const j = await r.json();
       rows = (j.venues || []).map(fromSheetRow); S.admin = !!j.admin; S.source = "Live from Google Sheet";
+      S.promoters = (j.promoters || []).filter(p => p.Name); S.media = (j.media || []).filter(m => m.Name);
       if (S.key && !j.admin) { toast("Owner key not accepted — showing the public view."); }
     } catch (e) { toast("Couldn't reach your Google Sheet — showing the saved list."); }
   }
@@ -101,9 +103,14 @@ function visible() {
 /* ---------------- panel ---------------- */
 function render() {
   const all = S.present && S.picked.size ? S.venues.filter(v => S.picked.has(v._id)) : S.venues;
-  const cities = [...new Set(all.map(v => v.city).filter(Boolean))].sort();
-  $("#cities").innerHTML = [`<button class="chip ${!S.f.city ? "on" : ""}" data-city=""><b>All</b> ${all.length}</button>`,
-    ...cities.map(c => `<button class="chip ${S.f.city === c ? "on" : ""}" data-city="${esc(c)}"><b>${esc(c)}</b> ${all.filter(v => v.city === c).length}</button>`)].join("");
+  renderViews();
+  const pool0 = S.view === "promoters" ? S.promoters : S.view === "media" ? S.media : all;
+  const cityOf = x => x.city || x.City || "";
+  const cities = [...new Set(pool0.map(cityOf).filter(Boolean))].sort();
+  $("#cities").innerHTML = [`<button class="chip ${!S.f.city ? "on" : ""}" data-city=""><b>All</b> ${pool0.length}</button>`,
+    ...cities.map(c => `<button class="chip ${S.f.city === c ? "on" : ""}" data-city="${esc(c)}"><b>${esc(c)}</b> ${pool0.filter(v => cityOf(v) === c).length}</button>`)].join("");
+  if (S.view !== "venues") { renderScene(); return; }
+  $(".filters").hidden = false;
   const pool = all.filter(v => !S.f.city || v.city === S.f.city);
   const types = [...new Set(pool.map(v => v.type || "Other"))].sort();
   $("#types").innerHTML = types.map(t => `<button class="chip ${S.f.types.has(t) ? "on" : ""}" data-type="${esc(t)}"><span class="dot" style="background:${TYPE_COLORS[t] || "#999"}"></span>${esc(t)}</button>`).join("");
@@ -117,10 +124,67 @@ function render() {
     : `<div class="empty">No venues match. Clear a filter or search another city.</div>`;
   renderLegend(vs);
 }
+function scenehere(v) {
+  const ps = S.promoters.filter(p => p.City === v.city && venueMatches(p["Home venues"], v)); if (!ps.length) return "";
+  return `<h3>Promoters & series here</h3>` + ps.map(p => `<div class="card" data-promo="${esc(p.Name)}"><span class="dot" style="background:${sceneColor(p.Type)}"></span><div><div class="nm">${esc(p.Name)}</div><div class="mt">${esc([p.Type, p.Genres].filter(Boolean).join(" · "))}</div></div></div>`).join("");
+}
 function renderLegend(vs) {
   const types = [...new Set(vs.map(v => v.type || "Other"))];
   $("#legend").innerHTML = S.admin ? Object.entries(STATUS_COLORS).map(([k, c]) => `<span><i class="dot" style="background:${c}"></i>${k}</span>`).join("") + (S.scout.length ? `<span><i class="dot" style="background:#5d5c64"></i>Scouted (OSM)</span>` : "")
     : types.map(t => `<span><i class="dot" style="background:${TYPE_COLORS[t] || "#999"}"></i>${esc(t)}</span>`).join("") + (S.scout.length ? `<span><i class="dot" style="background:#5d5c64"></i>Scouted (OSM)</span>` : "");
+}
+
+/* ---------------- scene: promoters & media ---------------- */
+const SCENE_COLORS = { Promoter: "#c9a961", Collective: "#e06666", Festival: "#6aa84f", "Party series": "#c27ba0", "Venue operator": "#6fa8dc", "Venue promoter": "#6fa8dc", Label: "#8e7cc3" };
+function sceneColor(t) { t = String(t || ""); for (const [k, c] of Object.entries(SCENE_COLORS)) if (t.includes(k)) return c; return "#8d8c94"; }
+function renderViews() {
+  const el = $("#views"); if (!el) return;
+  const hasScene = S.promoters.length || S.media.length;
+  el.hidden = S.present || !hasScene;
+  el.innerHTML = [["venues", "Venues", S.venues.length], ["promoters", "Promoters", S.promoters.length], ["media", "Media & blogs", S.media.length]]
+    .map(([k, l, n]) => `<button class="vt ${S.view === k ? "on" : ""}" data-view="${k}">${l} <small>${n}</small></button>`).join("");
+}
+function sceneList() {
+  const q = S.f.q.toLowerCase(); const src = S.view === "promoters" ? S.promoters : S.media;
+  return src.filter(x => (!S.f.city || x.City === S.f.city) && (!q || Object.values(x).join(" ").toLowerCase().includes(q)))
+    .sort((a, b) => String(a.Status === "Check").localeCompare(String(b.Status === "Check")) || String(a.Name).localeCompare(String(b.Name)));
+}
+function renderScene() {
+  $(".filters").hidden = true;
+  const xs = sceneList(), P = S.view === "promoters";
+  $("#stats").textContent = `${xs.length} ${P ? "promoters, collectives & series" : "media outlets, blogs & listings"}${S.f.city ? " in " + S.f.city : ""}`;
+  $("#list").innerHTML = xs.length ? xs.map((x, i) => `<div class="card ${S.selScene === x ? "sel" : ""}" data-scene="${i}">
+      <span class="dot" style="background:${P ? sceneColor(x.Type) : "#6fa8dc"}"></span>
+      <div style="min-width:0;flex:1"><div class="nm">${esc(x.Name)}</div><div class="mt">${esc([x.Type, P ? x.Genres : x.Focus].filter(Boolean).join(" · "))}</div>
+      ${P && x["Home venues"] ? `<div class="mt">@ ${esc(x["Home venues"])}</div>` : ""}</div>
+      <div class="cap" style="font-size:12px;font-family:Inter">${P && x["Last event seen"] ? `<small>last seen</small>${esc(String(x["Last event seen"]).slice(0, 10))}` : ""}</div></div>`).join("")
+    : `<div class="empty">Nothing here yet for this city.</div>`;
+  S._sceneShown = xs;
+  $("#legend").innerHTML = P ? Object.entries(SCENE_COLORS).filter(([k]) => !k.startsWith("Venue promoter")).map(([k, c]) => `<span><i class="dot" style="background:${c}"></i>${esc(k)}</span>`).join("") : "";
+}
+function openScene(x) {
+  S.selScene = x; render(); const P = S.view === "promoters"; const d = $("#detail");
+  const linked = P ? S.venues.filter(v => v.city === x.City && venueMatches(x["Home venues"], v)) : [];
+  d.innerHTML = `<button class="ic x" id="closeD">Close</button>
+    <span class="tag"><span class="dot" style="background:${P ? sceneColor(x.Type) : "#6fa8dc"};margin-right:6px"></span>${esc(x.Type || (P ? "Promoter" : "Media"))}</span>
+    <h1>${esc(x.Name)}</h1><div class="sub">${esc([x.City, x.Country].filter(Boolean).join(" · "))}</div>
+    ${x["Public description"] ? `<p class="desc">${esc(x["Public description"])}</p>` : x.Focus ? `<p class="desc">${esc(x.Focus)}</p>` : ""}
+    <div class="links">${x.Website ? `<a class="btn" href="${esc(x.Website)}" target="_blank" rel="noopener">Website ↗</a>` : ""}${x.Instagram ? `<a class="btn" href="${esc(igUrl(x.Instagram))}" target="_blank" rel="noopener">Instagram ↗</a>` : ""}</div>
+    <h3>Details</h3><div class="kv">
+      ${kv("Genres", esc(x.Genres), true)}${kv("Home venues", esc(x["Home venues"]), true)}${kv("Event series", esc(x["Event series"]), true)}
+      ${kv("Key people", esc(x["Key people"]), true)}${kv("Booking / contact", esc(x["Booking contact"] || x["Submit / contact"]), true)}
+      ${kv("Last event seen", esc(x["Last event seen"]))}${kv("Status", esc(x.Status))}${kv("Verified", esc(x.Verified))}
+      ${S.admin ? kv("Private notes", esc(x["Notes (private)"]), true) + kv("In my rolodex", esc(x["In my rolo"])) + kv("Sources", esc(x.Sources), true) : ""}
+    </div>
+    ${linked.length ? `<h3>Venues they use</h3>${linked.map(v => `<div class="card" data-goto="${esc(v._id)}"><span class="dot" style="background:${TYPE_COLORS[v.type] || "#999"}"></span><div><div class="nm">${esc(v.name)}</div><div class="mt">${esc([v.type, v.area].filter(Boolean).join(" · "))}</div></div></div>`).join("")}` : ""}`;
+  d.hidden = false;
+  $("#closeD").onclick = () => { d.hidden = true; S.selScene = null; render(); };
+  d.querySelectorAll("[data-goto]").forEach(c => c.onclick = () => { S.view = "venues"; S.selScene = null; open(c.dataset.goto); });
+}
+function venueMatches(text, v) {
+  text = String(text || "").toLowerCase(); if (!text || !v.name) return false;
+  const nm = v.name.toLowerCase().replace(/\(.*?\)/g, "").replace(/\b(nightclub|club|atx|sd|la|sf|the)\b/g, "").replace(/\s+/g, " ").trim();
+  return nm.length >= 3 && text.includes(nm) && (!v.city || true);
 }
 
 /* ---------------- detail ---------------- */
@@ -159,10 +223,11 @@ function open(id, fly = true) {
     <div class="links">${v.link ? `<a class="btn" href="${esc(v.link)}" target="_blank" rel="noopener">Website ↗</a>` : ""}${v.ig ? `<a class="btn" href="${esc(igUrl(v.ig))}" target="_blank" rel="noopener">Instagram ↗</a>` : ""}
       <a class="btn" href="${gmaps(v)}" target="_blank" rel="noopener">Google Maps ↗</a>
       ${S.present || !S.admin ? `<a class="btn gold" href="mailto:${esc(C.CONTACT_EMAIL || "")}?subject=${encodeURIComponent("Venue inquiry: " + v.name)}">Inquire</a>` : ""}</div>
-    <h3>Specs</h3>${pub}${priv}`;
+    <h3>Specs</h3>${pub}${scenehere(v)}${priv}`;
   d.hidden = false;
   $("#closeD").onclick = () => { d.hidden = true; S.sel = null; render(); if (S.mapReady) S.map.getSource("sel").setData(fc([])); };
   const tb = $("#txBtn"); if (tb) tb.onclick = () => txLiquor(v);
+  d.querySelectorAll("[data-promo]").forEach(c => c.onclick = () => { const p = S.promoters.find(x => x.Name === c.dataset.promo); if (p) { S.view = "promoters"; openScene(p); } });
 }
 
 /* ---------------- Texas liquor receipts (Texas Comptroller, public) ---------------- */
@@ -325,7 +390,8 @@ function wire() {
   $("#status").onchange = e => { S.f.status = e.target.value; render(); pushMap(); };
   $("#q").oninput = e => { S.f.q = e.target.value; render(); pushMap(); };
   $("#q").onkeydown = e => { if (e.key === "Enter" && S.f.q.trim() && !visible().length) { const q = S.f.q.trim(); S.f.q = ""; e.target.value = ""; render(); pushMap(); goPlace(q); } };
-  $("#list").onclick = e => { const p = e.target.closest("[data-pick]"); if (p) { e.stopPropagation(); p.checked ? S.picked.add(p.dataset.pick) : S.picked.delete(p.dataset.pick); render(); return; } const c = e.target.closest("[data-id]"); if (c) open(c.dataset.id); };
+  $("#views").onclick = e => { const b = e.target.closest("[data-view]"); if (!b) return; S.view = b.dataset.view; S.selScene = null; $("#detail").hidden = true; render(); };
+  $("#list").onclick = e => { const sc = e.target.closest("[data-scene]"); if (sc) { const x = (S._sceneShown || [])[+sc.dataset.scene]; if (x) openScene(x); return; } const p = e.target.closest("[data-pick]"); if (p) { e.stopPropagation(); p.checked ? S.picked.add(p.dataset.pick) : S.picked.delete(p.dataset.pick); render(); return; } const c = e.target.closest("[data-id]"); if (c) open(c.dataset.id); };
   $("#shareBtn").onclick = share; $("#ownerBtn").onclick = owner; $("#scoutBtn").onclick = scout; $("#csvBtn").onclick = csv;
   $("#modal").onclick = e => { if (e.target.id === "modal" || e.target.closest("[data-close]")) closeModal(); };
   document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); $("#detail").hidden = true; } });
