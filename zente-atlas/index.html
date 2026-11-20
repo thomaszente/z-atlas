@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ZENTE ATLAS — Venues & Spaces</title>
+<meta name="description" content="A curated map of nightclubs, event spaces and venues worldwide.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header class="brand">
+      <div><div class="logo" id="brand">ZENTE ATLAS</div><div class="tagline" id="tagline">Venues & spaces</div></div>
+      <div class="hdr-actions">
+        <button class="ic" id="shareBtn" title="Share">Share</button>
+        <button class="ic" id="ownerBtn" title="Owner sign-in">Owner</button>
+      </div>
+    </header>
+    <div id="presentNote" class="present-note" hidden></div>
+    <div class="search">
+      <input id="q" placeholder="Search venues, or type any city and press Enter" autocomplete="off">
+    </div>
+    <div class="chips" id="cities"></div>
+    <div class="filters">
+      <div class="chips small" id="types"></div>
+      <div class="row">
+        <select id="cap"><option value="">Any capacity</option><option value="0-300">Up to 300</option><option value="300-1000">300 – 1,000</option><option value="1000-3000">1,000 – 3,000</option><option value="3000-999999">3,000+</option></select>
+        <select id="io"><option value="">Indoor & outdoor</option><option>Indoor</option><option>Outdoor</option><option>Both</option></select>
+        <label class="tog"><input type="checkbox" id="late"> Late license</label>
+      </div>
+      <div class="row owner-only" hidden>
+        <select id="status"><option value="">Any status</option><option>Scouting</option><option>Contacted</option><option>Visited</option><option>Negotiating</option><option>Booked / Partner</option><option>Pass</option></select>
+        <button class="btn sm" id="scoutBtn" title="Find nightclubs and venues in the current map view (OpenStreetMap)">✦ Scout this area</button>
+        <button class="btn sm" id="csvBtn">Export CSV</button>
+      </div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div id="list"></div>
+    <footer class="foot"><span id="src"></span> · Map © OpenStreetMap contributors · OpenFreeMap</footer>
+  </aside>
+  <main id="mapwrap">
+    <div id="map"></div>
+    <div id="legend"></div>
+    <section id="detail" hidden></section>
+    <div id="toast" hidden></div>
+  </main>
+</div>
+<div id="modal" hidden><div class="mbox" id="mbox"></div></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
