@@ -30,6 +30,26 @@ function toast(msg, ms = 3500) { const t = $("#toast"); t.textContent = msg; t.h
 
 /* ---------------- data ---------------- */
 function fromSheetRow(o) { const v = {}; for (const [h, val] of Object.entries(o)) { if (h.startsWith("★ ")) { (v.crit = v.crit || {})[h.slice(2)] = val; continue; } const k = HEAD[h]; if (k) v[k] = val; } return v; }
+/* Venues from ZEN SCOUT when it answers; the sheet fills in anything SCOUT doesn't have.
+   Owner view: the sheet's private columns are layered onto SCOUT's public rows by ID.
+   Shared links: only the venues the link covers. */
+async function venueRows(j) {
+  const sheet = j.venues || [];
+  if (!C.SCOUT_API) return sheet;
+  let scout;
+  try { const r = await fetch(C.SCOUT_API); if (!r.ok) throw 0; scout = (await r.json()).venues || []; } catch (_) { return sheet; }
+  if (!scout.length) return sheet;
+  const byId = new Map(sheet.filter(x => x.ID).map(x => [String(x.ID), x]));
+  const pick = S.share ? scout.filter(x => byId.has(String(x.ID))) : scout;
+  const out = pick.map(x => {
+    const row = byId.get(String(x.ID)); if (!row || !j.admin) return x;
+    const priv = {}; for (const [h, v] of Object.entries(row)) if (PRIVATE.has(HEAD[h]) || h.startsWith("★ ")) priv[h] = v;
+    return { ...x, ...priv };
+  });
+  if (!S.share) { const have = new Set(scout.map(x => String(x.ID))); for (const row of sheet) if (!row.ID || !have.has(String(row.ID))) out.push(row); }
+  S.fromScout = true;
+  return out;
+}
 async function load() {
   let rows = null;
   if (!C.SHEET_API) { gate("ZEN ATLAS isn't connected to its data yet."); return; }
@@ -39,11 +59,11 @@ async function load() {
     const r = await fetch(u); const j = await r.json();
     if (!j.auth) { gate(S.share ? "This shared link has expired. Ask for a new one." : "Couldn't load the map."); return; }
     hideGate();
-    rows = (j.venues || []).map(fromSheetRow); S.role = j.role || ""; S.admin = !!j.admin;
+    rows = (await venueRows(j)).map(fromSheetRow); S.role = j.role || ""; S.admin = !!j.admin;
     if (S.key && !j.admin && !S.share) toast("Owner key not accepted — showing the public view.");
     S.promoters = (j.promoters || []).filter(p => p.Name); S.media = (j.media || []).filter(m => m.Name);
     S.queue = j.queue || [];
-    S.source = "Live" + (j.updated ? " · " + new Date(j.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
+    S.source = (S.fromScout ? "ZEN SCOUT" : "Live") + (j.updated ? " · " + new Date(j.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "");
   } catch (e) { gate("Couldn't reach ZEN ATLAS right now. Check your connection and try again."); return; }
   if (S.present || S.share) { S.present = true; S.admin = false; }
   const geo = store.get("atlas-geo", {});
