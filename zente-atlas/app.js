@@ -343,6 +343,17 @@ async function initMap() {
     map.on("click", "pts", e => open(e.features[0].properties.id, false));
     map.on("click", "clusters", e => { const f = e.features[0]; map.getSource("venues").getClusterExpansionZoom(f.properties.cluster_id).then(z => map.easeTo({ center: f.geometry.coordinates, zoom: z + .5 })).catch(() => map.easeTo({ center: f.geometry.coordinates, zoom: map.getZoom() + 2 })); });
     map.on("click", "scout", e => scoutPopup(e.features[0], e.lngLat));
+    // Quick look on hover (desktop): name, type, area and the specs promoters check first.
+    const hoverPop = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: "hoverpop", maxWidth: "260px" });
+    map.on("mousemove", "pts", e => {
+      if (matchMedia("(hover: none)").matches) return;
+      const f = e.features[0]; const v = S.venues.find(x => x._id === f.properties.id); if (!v) return;
+      const row = (k, label) => v[k] ? `<div class="hp-row"><span>${label}</span><b>${esc(String(v[k]).length > 60 ? String(v[k]).slice(0, 58) + "…" : v[k])}</b></div>` : "";
+      const specs = row("cap", "Capacity") + row("late", "Curfew") + row("sound", "Sound") + row("io", "Setting");
+      hoverPop.setLngLat(f.geometry.coordinates).setHTML(`<div class="hp-k">${esc([v.type, v.area].filter(Boolean).join(" · "))}</div><div class="hp-n">${esc(v.name)}</div>${specs || '<div class="hp-e">No specs on record yet</div>'}<div class="hp-f">Click for details</div>`).addTo(map);
+    });
+    map.on("mouseleave", "pts", () => hoverPop.remove());
+    map.on("click", "pts", () => hoverPop.remove());
     ["pts", "clusters", "scout"].forEach(l => { map.on("mouseenter", l, () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", l, () => map.getCanvas().style.cursor = ""); });
     if (S.f.city) fitCity(S.f.city);
   });
