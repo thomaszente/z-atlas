@@ -8,6 +8,10 @@ window.ATLAS_CONFIG = {
   // Empty = the app uses the public starter list in venues.json.
   SHEET_API: "https://script.google.com/macros/s/AKfycbzWZAp4sCPpGHIWYOfzdB7MDFmiOKLfLWT6OKNu08IHSbIkoVUmKMQ7qNHRSa9vj7zx/exec",
 
+  // Venues come from ZEN SCOUT (the main source) — public details only. Empty = venues come from the sheet.
+  // The sheet still provides promoters, media, share links and the owner view's private columns.
+  SCOUT_API: "https://zen-scout.vercel.app/api/public/venues",
+
   // Map start position [lng, lat] and zoom (Austin).
   CENTER: [-97.7431, 30.2672],
   ZOOM: 11.8,
