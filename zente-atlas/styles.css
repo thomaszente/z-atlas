@@ -127,3 +127,6 @@ body.gated #app{filter:blur(6px);pointer-events:none}
 .hp-row span{color:var(--muted)}.hp-row b{font-weight:500}
 .hp-e{font-size:12px;color:var(--faint,#5f5e66);padding:3px 0}
 .hp-f{font-size:10.5px;color:var(--faint,#5f5e66);margin-top:8px}
+
+/* installed on a phone: keep clear of the notch and home bar */
+@media (display-mode: standalone){body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}}
